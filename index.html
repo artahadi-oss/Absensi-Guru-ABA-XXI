@@ -276,4 +276,426 @@
                                 <th class="py-3 px-4">Keterangan Izin / Alasan</th>
                             </tr>
                         </thead>
-                        <tbody id="log-table-body" class="divide-y divide-slate
+                        <tbody id="log-table-body" class="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="empty-state" class="hidden p-8 text-center text-slate-400">
+                    <i class="fa-regular fa-folder-open text-3xl mb-2"></i>
+                    <p class="text-xs">Tidak ditemukan data presensi yang sesuai dengan filter.</p>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="mt-auto border-t border-slate-200 bg-white py-4 no-print">
+        <div class="max-w-7xl mx-auto px-4 text-center text-xs text-slate-500">
+            © 2026 Presensi Guru TK ABA Karangmojo XXI • Terhubung Google Sheets API
+        </div>
+    </footer>
+
+    <!-- JS Logic -->
+    <script>
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwbKNNhNeobXr5j8XoTOn7Xlaimb2yEg8rHbWjA4zlXG80sHxYFimRq5-sipxh6FsKJ/exec";
+
+        const STAFF_LIST = [
+            { id: 1, name: "Arwanto Hadi Saputro", role: "Guru" },
+            { id: 2, name: "Isti Purwaningsih", role: "Guru" },
+            { id: 3, name: "Tri Kusumarani", role: "Guru" },
+            { id: 4, name: "Yulia Indah Herawati", role: "Guru" },
+            { id: 5, name: "Lina Ernawati", role: "PTY" }
+        ];
+
+        const DAY_NAMES = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+        const MONTH_NAMES = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+
+        let attendanceRecords = [];
+        let chartInstance = null;
+
+        window.onload = function() {
+            initDates();
+            fetchDataFromSheet();
+        };
+
+        function initDates() {
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            
+            document.getElementById('input-date').value = `${yyyy}-${mm}-${dd}`;
+            document.getElementById('filter-month').value = `${yyyy}-${mm}`;
+            updateDayBadge(today);
+            renderInputForm(); // Render langsung agar PTK/Guru muncul saat awal dibuka
+        }
+
+        function updateDayBadge(dateObj) {
+            const dayName = DAY_NAMES[dateObj.getDay()];
+            document.getElementById('current-day-badge').innerText = `${dayName}, ${dateObj.getDate()} ${MONTH_NAMES[dateObj.getMonth()]} ${dateObj.getFullYear()}`;
+        }
+
+        function onDateChange() {
+            const val = document.getElementById('input-date').value;
+            if (val) updateDayBadge(new Date(val));
+            renderInputForm();
+        }
+
+        function renderInputForm() {
+            const container = document.getElementById('staff-input-list');
+            const currentDateVal = document.getElementById('input-date').value;
+            
+            const existingMap = {};
+            if (currentDateVal) {
+                attendanceRecords
+                    .filter(r => r.tanggal === currentDateVal)
+                    .forEach(r => { existingMap[r.nama] = r; });
+            }
+
+            let html = '';
+            STAFF_LIST.forEach(staff => {
+                const existing = existingMap[staff.name];
+                const currentStatus = existing ? existing.status : 'Masuk';
+                const currentNote = existing && existing.keterangan !== '-' ? existing.keterangan : '';
+
+                html += `
+                <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm transition hover:shadow-md">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl ${staff.role === 'Guru' ? 'bg-teal-50 text-teal-600' : 'bg-indigo-50 text-indigo-600'} flex items-center justify-center font-bold text-sm">
+                                ${staff.name.charAt(0)}
+                            </div>
+                            <div>
+                                <h4 class="text-sm font-bold text-slate-800">${staff.name}</h4>
+                                <span class="inline-block px-2 py-0.5 text-[10px] font-semibold rounded-md ${staff.role === 'Guru' ? 'bg-teal-100 text-teal-700' : 'bg-indigo-100 text-indigo-700'}">${staff.role}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-2">
+                            <label class="cursor-pointer">
+                                <input type="radio" name="status-${staff.id}" value="Masuk" ${currentStatus === 'Masuk' ? 'checked' : ''} onchange="toggleNoteInput(${staff.id})" class="peer hidden">
+                                <span class="px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-600 peer-checked:bg-emerald-500 peer-checked:text-white peer-checked:border-emerald-500 transition-all flex items-center gap-1.5">
+                                    <i class="fa-solid fa-check"></i> Masuk
+                                </span>
+                            </label>
+
+                            <label class="cursor-pointer">
+                                <input type="radio" name="status-${staff.id}" value="Izin" ${currentStatus === 'Izin' ? 'checked' : ''} onchange="toggleNoteInput(${staff.id})" class="peer hidden">
+                                <span class="px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-600 peer-checked:bg-amber-500 peer-checked:text-white peer-checked:border-amber-500 transition-all flex items-center gap-1.5">
+                                    <i class="fa-solid fa-envelope"></i> Izin
+                                </span>
+                            </label>
+
+                            <label class="cursor-pointer">
+                                <input type="radio" name="status-${staff.id}" value="Tanpa Keterangan" ${currentStatus === 'Tanpa Keterangan' ? 'checked' : ''} onchange="toggleNoteInput(${staff.id})" class="peer hidden">
+                                <span class="px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-600 peer-checked:bg-rose-500 peer-checked:text-white peer-checked:border-rose-500 transition-all flex items-center gap-1.5">
+                                    <i class="fa-solid fa-xmark"></i> Tanpa Ket.
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="note-container-${staff.id}" class="${currentStatus === 'Izin' ? 'block' : 'hidden'} mt-3 pt-3 border-t border-slate-100">
+                        <label class="block text-[11px] font-semibold text-amber-700 mb-1">Detail Keterangan / Alasan Izin:</label>
+                        <input type="text" id="note-input-${staff.id}" value="${currentNote}" placeholder="Contoh: Sakit, Dinas Luar, Keperluan Keluarga..." class="w-full text-xs px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                    </div>
+                </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        function toggleNoteInput(staffId) {
+            const selectedStatus = document.querySelector(`input[name="status-${staffId}"]:checked`).value;
+            const container = document.getElementById(`note-container-${staffId}`);
+            if (selectedStatus === 'Izin') {
+                container.classList.remove('hidden');
+            } else {
+                container.classList.add('hidden');
+            }
+        }
+
+        function setAllStatus(statusVal) {
+            STAFF_LIST.forEach(staff => {
+                const radio = document.querySelector(`input[name="status-${staff.id}"][value="${statusVal}"]`);
+                if (radio) {
+                    radio.checked = true;
+                    toggleNoteInput(staff.id);
+                }
+            });
+            showAlert(`Semua staf diatur ke status: <b>${statusVal}</b>`, 'info');
+        }
+
+        async function fetchDataFromSheet() {
+            showAlert('Memuat data dari Google Spreadsheet...', 'info');
+            try {
+                const response = await fetch(SCRIPT_URL);
+                const data = await response.json();
+                if (Array.isArray(data)) {
+                    attendanceRecords = data;
+                    renderSummary();
+                    renderInputForm();
+                    hideAlert();
+                } else {
+                    showAlert('Gagal memuat format data dari spreadsheet.', 'danger');
+                }
+            } catch (error) {
+                showAlert('Kesalahan koneksi saat mengambil data dari Spreadsheet.', 'danger');
+            }
+        }
+
+        async function saveAttendance() {
+            const dateVal = document.getElementById('input-date').value;
+            if (!dateVal) {
+                showAlert('Pilih tanggal presensi terlebih dahulu!', 'danger');
+                return;
+            }
+
+            const btnSubmit = document.getElementById('btn-submit');
+            btnSubmit.disabled = true;
+            btnSubmit.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan ke Spreadsheet...`;
+
+            const dateObj = new Date(dateVal);
+            const hariVal = DAY_NAMES[dateObj.getDay()];
+
+            try {
+                for (let staff of STAFF_LIST) {
+                    const statusRadio = document.querySelector(`input[name="status-${staff.id}"]:checked`);
+                    const statusVal = statusRadio ? statusRadio.value : 'Masuk';
+                    let noteVal = '-';
+
+                    if (statusVal === 'Izin') {
+                        const noteInput = document.getElementById(`note-input-${staff.id}`);
+                        noteVal = noteInput && noteInput.value.trim() !== '' ? noteInput.value.trim() : 'Izin';
+                    }
+
+                    const payload = {
+                        tanggal: dateVal,
+                        hari: hariVal,
+                        nama: staff.name,
+                        status: statusVal,
+                        keterangan: noteVal
+                    };
+
+                    await fetch(SCRIPT_URL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                }
+
+                showAlert('Presensi berhasil dikirim & tersimpan di Google Spreadsheet!', 'success');
+                await fetchDataFromSheet();
+            } catch (error) {
+                showAlert('Gagal mengirim data ke spreadsheet.', 'danger');
+            } finally {
+                btnSubmit.disabled = false;
+                btnSubmit.innerHTML = `<i class="fa-solid fa-floppy-disk"></i> Simpan & Kirim ke Spreadsheet`;
+            }
+        }
+
+        function switchTab(tabName) {
+            const btnInput = document.getElementById('tab-btn-input');
+            const btnRekap = document.getElementById('tab-btn-rekap');
+            const secInput = document.getElementById('section-input');
+            const secRekap = document.getElementById('section-rekap');
+
+            if (tabName === 'input') {
+                secInput.classList.remove('hidden');
+                secRekap.classList.add('hidden');
+                btnInput.className = "px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 bg-white text-teal-800 shadow-sm flex items-center gap-2";
+                btnRekap.className = "px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 bg-teal-800/60 hover:bg-white/20 text-white border border-white/20 flex items-center gap-2";
+            } else {
+                secInput.classList.add('hidden');
+                secRekap.classList.remove('hidden');
+                btnRekap.className = "px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 bg-white text-teal-800 shadow-sm flex items-center gap-2";
+                btnInput.className = "px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200 bg-teal-800/60 hover:bg-white/20 text-white border border-white/20 flex items-center gap-2";
+                renderSummary();
+            }
+        }
+
+        function filterData() {
+            renderSummary();
+        }
+
+        function resetFilters() {
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            document.getElementById('filter-month').value = `${yyyy}-${mm}`;
+            document.getElementById('filter-status').value = '';
+            document.getElementById('search-log').value = '';
+            renderSummary();
+        }
+
+        function renderSummary() {
+            const monthFilter = document.getElementById('filter-month').value;
+            const statusFilter = document.getElementById('filter-status').value;
+            const searchQuery = document.getElementById('search-log').value.toLowerCase();
+
+            let filtered = attendanceRecords.filter(r => {
+                let matchMonth = true;
+                if (monthFilter && r.tanggal) {
+                    matchMonth = r.tanggal.startsWith(monthFilter);
+                }
+                let matchStatus = true;
+                if (statusFilter) {
+                    matchStatus = r.status === statusFilter;
+                }
+                let matchSearch = true;
+                if (searchQuery) {
+                    matchSearch = (r.nama && r.nama.toLowerCase().includes(searchQuery)) ||
+                                  (r.keterangan && r.keterangan.toLowerCase().includes(searchQuery)) ||
+                                  (r.tanggal && r.tanggal.toLowerCase().includes(searchQuery));
+                }
+                return matchMonth && matchStatus && matchSearch;
+            });
+
+            const totalRecords = filtered.length;
+            const totalMasuk = filtered.filter(r => r.status === 'Masuk').length;
+            const totalIzin = filtered.filter(r => r.status === 'Izin').length;
+            const totalAlpha = filtered.filter(r => r.status === 'Tanpa Keterangan').length;
+            const percentage = totalRecords > 0 ? Math.round((totalMasuk / totalRecords) * 100) : 0;
+
+            document.getElementById('stat-total-records').innerText = totalRecords;
+            document.getElementById('stat-percentage').innerText = percentage + '%';
+            document.getElementById('stat-total-izin').innerText = totalIzin;
+            document.getElementById('stat-total-alpha').innerText = totalAlpha;
+
+            let staffSummaryHtml = '';
+            STAFF_LIST.forEach(staff => {
+                const staffRecords = filtered.filter(r => r.nama === staff.name);
+                const sMasuk = staffRecords.filter(r => r.status === 'Masuk').length;
+                const sIzin = staffRecords.filter(r => r.status === 'Izin').length;
+                const sAlpha = staffRecords.filter(r => r.status === 'Tanpa Keterangan').length;
+                const sTotal = staffRecords.length;
+                const sPercent = sTotal > 0 ? Math.round((sMasuk / sTotal) * 100) : 0;
+
+                staffSummaryHtml += `
+                    <tr class="hover:bg-slate-50/80">
+                        <td class="py-3 px-4 font-bold text-slate-800">${staff.name}</td>
+                        <td class="py-3 px-4"><span class="px-2 py-0.5 text-[10px] font-semibold rounded-md ${staff.role === 'Guru' ? 'bg-teal-100 text-teal-700' : 'bg-indigo-100 text-indigo-700'}">${staff.role}</span></td>
+                        <td class="py-3 px-4 text-center font-bold text-emerald-600">${sMasuk}</td>
+                        <td class="py-3 px-4 text-center font-bold text-amber-600">${sIzin}</td>
+                        <td class="py-3 px-4 text-center font-bold text-rose-600">${sAlpha}</td>
+                        <td class="py-3 px-4 text-center font-bold text-slate-700">${sPercent}%</td>
+                    </tr>
+                `;
+            });
+            document.getElementById('summary-staff-body').innerHTML = staffSummaryHtml;
+
+            const logBody = document.getElementById('log-table-body');
+            const emptyState = document.getElementById('empty-state');
+
+            if (filtered.length === 0) {
+                logBody.innerHTML = '';
+                emptyState.classList.remove('hidden');
+            } else {
+                emptyState.classList.add('hidden');
+                let logHtml = '';
+                filtered.forEach((r, idx) => {
+                    const staffObj = STAFF_LIST.find(s => s.name === r.nama);
+                    const role = staffObj ? staffObj.role : '-';
+                    
+                    let badgeClass = 'bg-emerald-100 text-emerald-700';
+                    if (r.status === 'Izin') badgeClass = 'bg-amber-100 text-amber-700';
+                    if (r.status === 'Tanpa Keterangan') badgeClass = 'bg-rose-100 text-rose-700';
+
+                    logHtml += `
+                        <tr class="hover:bg-slate-50/80">
+                            <td class="py-3 px-4 font-mono text-slate-400">${idx + 1}</td>
+                            <td class="py-3 px-4">${r.hari || '-'}, ${r.tanggal || '-'}</td>
+                            <td class="py-3 px-4 font-semibold text-slate-800">${r.nama || '-'}</td>
+                            <td class="py-3 px-4">${role}</td>
+                            <td class="py-3 px-4"><span class="px-2.5 py-1 rounded-lg text-[10px] font-bold ${badgeClass}">${r.status}</span></td>
+                            <td class="py-3 px-4 text-slate-600">${r.keterangan && r.keterangan !== '-' ? r.keterangan : '-'}</td>
+                        </tr>
+                    `;
+                });
+                logBody.innerHTML = logHtml;
+            }
+
+            updateChart(totalMasuk, totalIzin, totalAlpha);
+        }
+
+        function initChart() {
+            const ctx = document.getElementById('attendanceChart').getContext('2d');
+            chartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Masuk', 'Izin', 'Tanpa Keterangan'],
+                    datasets: [{
+                        data: [0, 0, 0],
+                        backgroundColor: ['#10b981', '#f59e0b', '#f43f5e'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } }
+                }
+            });
+        }
+
+        // Initialize chart on load
+        document.addEventListener("DOMContentLoaded", () => {
+            initChart();
+        });
+
+        function updateChart(masuk, izin, alpha) {
+            if (chartInstance) {
+                chartInstance.data.datasets[0].data = [masuk, izin, alpha];
+                chartInstance.update();
+            }
+        }
+
+        function exportCSV() {
+            let csv = 'No,Hari,Tanggal,Nama,Jabatan,Status,Keterangan\n';
+            const rows = document.querySelectorAll('#log-table-body tr');
+            rows.forEach((tr) => {
+                const cols = tr.querySelectorAll('td');
+                if(cols.length > 0) {
+                    const rowData = Array.from(cols).map(c => `"${c.innerText.replace(/"/g, '""')}"`);
+                    csv += rowData.join(',') + '\n';
+                }
+            });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `Rekap_Absensi_TK_ABA_${document.getElementById('filter-month').value || 'Semua'}.csv`;
+            link.click();
+        }
+
+        function triggerPrint() {
+            document.getElementById('print-date-range').innerText = `Periode Bulan: ${document.getElementById('filter-month').value}`;
+            window.print();
+        }
+
+        function showAlert(message, type) {
+            const alertBox = document.getElementById('alert-box');
+            const alertContent = document.getElementById('alert-content');
+            
+            alertBox.className = `rounded-xl p-4 transition-all duration-300 flex items-center justify-between ${
+                type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' :
+                type === 'danger' ? 'bg-rose-50 text-rose-800 border border-rose-200' :
+                'bg-teal-50 text-teal-800 border border-teal-200'
+            }`;
+            alertContent.innerHTML = message;
+            alertBox.classList.remove('hidden');
+
+            if (type === 'success' || type === 'info') {
+                setTimeout(() => hideAlert(), 5000);
+            }
+        }
+
+        function hideAlert() {
+            document.getElementById('alert-box').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
